@@ -1036,8 +1036,33 @@
     if (proposal) {
       service.propagate(viewModel.engagement.id, section, [],
         'Report edit proposed for Section ' + section.numeral);
+      requestImpactReasoning(viewModel, section, text, proposal);
     }
     return proposal;
+  }
+
+  /**
+   * Asks the Impact Agent to sharpen the advisory text on an edit proposal.
+   *
+   * Fired after the proposal exists, never before it: the suggestion is created
+   * with the structural impact description synchronously, so the edit is filed
+   * and visible whether or not any AI is reachable. The agent then rewrites
+   * that advisory text in place if it can, which republishes and re-renders
+   * this workspace through the ordinary state subscription. It proposes no
+   * change of its own — the edit remains the only thing awaiting a decision.
+   */
+  function requestImpactReasoning(viewModel, section, text, proposal) {
+    var agent = AuditOS.impactAgent;
+    if (!agent || !proposal || !proposal.suggestion) {
+      return;
+    }
+    agent.requestReasoning({
+      engagementId: viewModel.engagement.id,
+      suggestion: proposal.suggestion,
+      impact: proposal.impact,
+      sectionLabel: 'Section ' + (section.numeral || section.id) + ' — ' + (section.title || ''),
+      editText: text
+    });
   }
 
   /**

@@ -15,6 +15,7 @@ no FastAPI import — so these run in any environment that has Python.
 import os
 import re
 import sys
+import typing
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,13 +31,14 @@ def _load_helpers():
     source = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")).read()
     start = source.index("def enforce_single_paragraph")
     end = source.index("@app.get")
-    namespace = {"re": re, "List": list}
+    namespace = {"re": re, "List": typing.List, "Optional": typing.Optional}
     exec(compile(source[start:end], "main.py-helpers", "exec"), namespace)
     return namespace
 
 
 HELPERS = _load_helpers()
 enforce_single_paragraph = HELPERS["enforce_single_paragraph"]
+parse_impact_lines = HELPERS["parse_impact_lines"]
 ungrounded_numbers = HELPERS["ungrounded_numbers"]
 numbers_in = HELPERS["numbers_in"]
 
@@ -124,6 +126,104 @@ class GroundingTests(unittest.TestCase):
     def test_multiple_inventions_are_all_reported(self):
         draft = "500 controls, 42 findings."
         self.assertEqual(ungrounded_numbers(draft, FACTS), ["42", "500"])
+
+
+class _Target:
+    """Stands in for the ImpactTarget pydantic model, which these tests do not
+    import — parse_impact_lines only reads `.domain` and `.label`."""
+
+    def __init__(self, domain, label):
+        self.domain = domain
+        self.label = label
+
+
+TARGETS = [
+    _Target("walkthrough", "Walkthrough"),
+    _Target("evidence", "Evidence"),
+    _Target("controls", "Controls"),
+]
+
+
+class ParseImpactLinesTests(unittest.TestCase):
+    """An impact list that silently drops an upstream object tells a reviewer
+    there is nothing to check there. That is a different claim from "the model
+    did not answer", so a partial answer is refused rather than trimmed."""
+
+    def test_parses_one_line_per_target_in_order(self):
+        text = (
+            "Walkthrough: Confirm the sessions still support the revised wording.\n"
+            "Evidence: Check the approved items still evidence the change.\n"
+            "Controls: Verify the in-scope controls still match."
+        )
+        result = parse_impact_lines(text, TARGETS)
+        self.assertEqual([r["domain"] for r in result], ["walkthrough", "evidence", "controls"])
+        self.assertTrue(result[0]["reasoning"].startswith("Confirm the sessions"))
+
+    def test_order_follows_the_targets_not_the_model(self):
+        text = "Controls: c sentence.\nWalkthrough: w sentence.\nEvidence: e sentence."
+        result = parse_impact_lines(text, TARGETS)
+        self.assertEqual([r["domain"] for r in result], ["walkthrough", "evidence", "controls"])
+
+    def test_label_matching_ignores_case_and_bullets(self):
+        text = "- walkthrough: w.\n* EVIDENCE: e.\n  Controls: c."
+        self.assertIsNotNone(parse_impact_lines(text, TARGETS))
+
+    def test_label_may_echo_the_prompt_parenthetical(self):
+        # The prompt presents objects as "Label (n recorded)"; the model echoing
+        # that back is a well-formed answer, not a wrong label.
+        text = (
+            "Walkthrough (none recorded): No sessions support the edit.\n"
+            "Evidence (301 recorded): Verify the items confirm it.\n"
+            "Controls (121 recorded): Confirm the descriptions match."
+        )
+        result = parse_impact_lines(text, TARGETS)
+        self.assertIsNotNone(result)
+        self.assertEqual([r["domain"] for r in result], ["walkthrough", "evidence", "controls"])
+        self.assertEqual(result[0]["reasoning"], "No sessions support the edit.")
+
+    def test_missing_target_is_refused(self):
+        text = "Walkthrough: w sentence.\nEvidence: e sentence."
+        self.assertIsNone(parse_impact_lines(text, TARGETS), "a dropped object is a refusal")
+
+    def test_unknown_label_is_refused(self):
+        text = (
+            "Walkthrough: w.\nEvidence: e.\nControls: c.\n"
+            "Findings: an object nobody asked about."
+        )
+        self.assertIsNone(parse_impact_lines(text, TARGETS),
+                          "naming an object that does not feed the section is a refusal")
+
+    def test_empty_sentence_counts_as_missing(self):
+        text = "Walkthrough: w.\nEvidence:\nControls: c."
+        self.assertIsNone(parse_impact_lines(text, TARGETS))
+
+    def test_prose_with_no_lines_is_refused(self):
+        self.assertIsNone(parse_impact_lines("This edit affects several things.", TARGETS))
+
+    def test_first_answer_per_target_wins(self):
+        text = "Walkthrough: first.\nWalkthrough: second.\nEvidence: e.\nControls: c."
+        result = parse_impact_lines(text, TARGETS)
+        self.assertEqual(result[0]["reasoning"], "first.")
+
+
+class ImpactGroundingTests(unittest.TestCase):
+    """The same counter guards impact reasoning: the objects carry counts, and
+    a figure the reviewer was not given must not appear in the advice."""
+
+    PROMPT = (
+        "Upstream objects this section is generated from:\n"
+        "- Walkthrough (12 recorded)\n"
+        "- Evidence (75 recorded)\n"
+        "- Controls (94 recorded)"
+    )
+
+    def test_reasoning_reusing_supplied_counts_passes(self):
+        text = "Check the 12 sessions and all 94 controls."
+        self.assertEqual(ungrounded_numbers(text, self.PROMPT), [])
+
+    def test_invented_count_is_caught(self):
+        text = "Check the 40 outstanding evidence items."
+        self.assertEqual(ungrounded_numbers(text, self.PROMPT), ["40"])
 
 
 if __name__ == "__main__":

@@ -338,7 +338,7 @@ This is the most direct answer to "how much of the AI vision is actually built?"
 | Memory & Knowledge Architecture | `industry-knowledge.js` (1 of 5 layers) | **Partially implemented** |
 | Orchestration Architecture (the scheduler) | none (`dependency-service.js` models data/sequence only) | **Not implemented** — the widest gap found |
 | Explainability Engine | `ai-lineage-service.js` | **Implemented** — populated by the Narrative Agent on approval; zero records in the seeded dataset |
-| AI Agents (all seven) | `narrative-agent.js` (1 of 7) | **Partially implemented** — the Documentation agent drafts Section III; the other six are named and specified below |
+| AI Agents (all seven) | `narrative-agent.js`, `impact-agent.js` (2 of 7) | **Partially implemented** — the Documentation agent drafts Section III and the Reporting agent reasons about edit impact; the other five are named and specified below |
 
 Eight of these nine rows are unchanged: Release 1 remains thorough about the *mechanics* of governance — writes are audited, propagation is deterministic, lifecycles are enforced — and honest about the absence of intelligence behind them. The ninth is where that changed. The Narrative Agent is a real model call, and it landed without altering a single one of the mechanics rows: it drafts, it proposes, and a human decides. The Human Approval Engine is still marked *not implemented* because no general engine exists — what exists is the Suggestion lifecycle carrying one agent's output, which is the substrate such an engine would be built on rather than the engine itself.
 
@@ -399,7 +399,7 @@ graph LR
 | Evidence | `EVIDENCE_UPDATED` | `ai-lineage-service.js`'s `aiLineage`/`origin` block | Named data contract, zero populated records |
 | Testing | `TESTING_UPDATED` | `testing.js`'s Appendix A comment | Comment only, no reserved function |
 | Findings | `FINDINGS_UPDATED` | `findings.js`'s `"AI Drafted"` lifecycle state | Named state, zero populated records |
-| Reporting | `REPORT_UPDATED` | `reportPropagationService.describeImpact` | Named function, **already returns real templated text** |
+| Reporting | `REPORT_UPDATED` | `impact-agent.js` → `reportPropagationService.describeImpact` | **Implemented** — reasons about what an edit implies for each upstream object |
 
 Every agent shares the same governance mechanics regardless of domain: output enters the existing `Suggested → Reviewed → Approved → Applied` lifecycle, every approved write records one immutable audit event, and failures — insufficient context, provider failure, timeout — would never modify the Shared Audit State and would always be observable.
 
@@ -415,7 +415,7 @@ graph TD
     RGS --> S5["V — Entity Information<br/>(generated, not audited)"]
     S3 -.->|"narrative-agent.js drafts → Suggestion → human approval"| DN["AI-authored prose — implemented"]
     RGS --> RPS["report-propagation-service.js"]
-    RPS -.->|"describeImpact seam — already returns templated text"| DI["AI reasoning about upstream impact — Release 2"]
+    RPS -.->|"impact-agent.js rewrites the advisory text in place"| DI["AI reasoning about upstream impact — implemented"]
 ```
 
 ![Reporting — Section III, rendering only what recorded facts support](images/reporting-draft.png)
@@ -544,7 +544,7 @@ The full comparative analysis behind each of these — implemented behavior, doc
 Neither, exactly. It's a fully functional, offline-capable prototype of the operational platform — real navigation, a real data model, real audited writes for three workflows (Walkthrough, both wizards, Global Approvals), and 919 passing tests. What it is *not* is a live, multi-user, persistent, AI-powered system — that's Release 2.
 
 **Does the AI actually work today?**
-One agent does. Run `backend/` with a Gemini key and the Narrative Agent drafts Section III's prose from that section's recorded facts, files it as a Suggestion, and publishes it only once a human approves — with AI lineage recorded against the section at that point. Every other AI-shaped surface — the other six agents, `describeImpact`, the Suggestion confidence field — remains a reserved extension point with an honest empty state. See [Release 1 vs. Release 2](#release-1-vs-release-2--the-seam-inventory).
+Two agents do. Run `backend/` with a Gemini key and the Narrative Agent drafts Section III's prose from that section's recorded facts, files it as a Suggestion, and publishes it only once a human approves — with AI lineage recorded against the section at that point. The Impact Agent reasons about what a proposed report edit means for each upstream object it draws on; it proposes no change of its own, only sharpening the advisory text on the edit a human is already deciding. Every other AI-shaped surface — the remaining five agents, the Suggestion confidence field — remains a reserved extension point with an honest empty state. See [Release 1 vs. Release 2](#release-1-vs-release-2--the-seam-inventory).
 
 **Can the AI put something wrong in a report?**
 Not without a person approving it, and not silently. A draft is grounded in the section's recorded facts by construction: the backend rejects any draft stating a figure those facts do not contain, so a fabricated number is refused rather than returned. What survives that check is still only a proposal — it appears in the Reporting inspector awaiting a decision, and reaches neither the report nor any export until it is approved and applied.

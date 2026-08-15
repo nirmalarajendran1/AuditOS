@@ -6,11 +6,21 @@ static, offline application served from `file://` or a plain static server;
 anything it can read, every user can read, so the Gemini key and the prompt
 that constrains the model both live here instead.
 
-Exactly one endpoint does work: `POST /api/narrative`, which drafts the prose
-paragraph for a report section from the recorded facts the section is generated
-from. It is not a general-purpose model proxy — the request shape is validated,
-the section allow-list is closed, and the prompt is assembled server-side so a
-browser cannot loosen the grounding constraint.
+Two endpoints do work, one per agent:
+
+  POST /api/narrative — drafts the prose paragraph for a report section from
+      the recorded facts that section is generated from. Its output is proposed
+      as a change to the report and published only on human approval.
+  POST /api/impact — reasons about what a proposed report edit implies for each
+      upstream object the section draws on. Its output is advisory text on the
+      edit suggestion a human is already deciding on; it proposes no change of
+      its own.
+
+Neither is a general-purpose model proxy: request shapes are validated, the
+section allow-list is closed, each prompt is assembled server-side so a browser
+cannot loosen its constraint, and each response is checked before it is
+returned — a draft stating a figure the inputs do not contain is refused rather
+than passed on.
 
 The service is optional. With it stopped, `prototype/index.html` still opens
 by double-click and the report renders exactly as it does with no AI at all;
@@ -108,6 +118,36 @@ Format rules:
 
 Return only the paragraph. Do not preface it or comment on it."""
 
+# The impact-reasoning constraint (report-propagation-service.js →
+# `describeImpact`). A report edit raises a question about the objects the
+# section is generated from; this asks the model to reason about what the edit
+# implies for each one. It must reason about the objects it was given and no
+# others — naming an upstream object that does not feed the section would send
+# a reviewer to change something the edit has no bearing on.
+IMPACT_INSTRUCTION = """\
+You are an assurance professional reviewing a proposed edit to a section of a \
+SOC 2 report.
+
+A report section is generated from upstream audit objects. You will be given \
+the section, the proposed edit, and the list of upstream objects that section \
+draws on. For EACH upstream object, write one sentence saying what the reviewer \
+should check about that object in light of the edit.
+
+Absolute rules:
+- Write about ONLY the upstream objects listed. Never mention an object, \
+domain, control, system, or person that is not in the list.
+- Do not state whether the edit is correct, approved, or should be accepted. \
+You raise the question; a human decides.
+- Do not invent counts, dates, identifiers, or findings.
+- If the edit has no bearing on an object, say that plainly for that object.
+
+Format rules:
+- Return one line per upstream object, in the order given.
+- Each line is: the object's exact label, then a colon, then one sentence.
+- Plain text only. No Markdown, no numbering, no bullet characters.
+
+Return only those lines."""
+
 
 class NarrativeBlock(BaseModel):
     """One recorded fact, mirroring a block from buildSystemDescriptionBlocks."""
@@ -125,6 +165,36 @@ class NarrativeRequest(BaseModel):
 
 class NarrativeResponse(BaseModel):
     text: str
+    provider: str
+    model: str
+    inputTokens: Optional[int] = None
+    outputTokens: Optional[int] = None
+    latencyMs: int
+
+
+class ImpactTarget(BaseModel):
+    """One upstream object a report section is generated from."""
+
+    domain: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=200)
+    count: int = 0
+    present: bool = False
+
+
+class ImpactRequest(BaseModel):
+    engagementId: str = Field(min_length=1, max_length=200)
+    sectionLabel: str = Field(min_length=1, max_length=300)
+    editText: str = Field(default="", max_length=8000)
+    targets: List[ImpactTarget] = Field(min_length=1, max_length=12)
+
+
+class ImpactReasoning(BaseModel):
+    domain: str
+    reasoning: str
+
+
+class ImpactResponse(BaseModel):
+    impacts: List[ImpactReasoning]
     provider: str
     model: str
     inputTokens: Optional[int] = None
@@ -208,6 +278,55 @@ def enforce_single_paragraph(text: str) -> str:
     cleaned = re.sub(r"(?<!\w)[*_]{1,2}(.+?)[*_]{1,2}(?!\w)", r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
+
+
+def build_impact_prompt(request: "ImpactRequest") -> str:
+    """The edit and the upstream objects it may bear on, verbatim."""
+    lines = [f"Section: {request.sectionLabel}"]
+    lines.append(f"Proposed edit: {request.editText.strip() or '(no text supplied)'}")
+    lines.append("")
+    lines.append("Upstream objects this section is generated from:")
+    for target in request.targets:
+        recorded = f"{target.count} recorded" if target.present else "none recorded"
+        lines.append(f"- {target.label} ({recorded})")
+    return "\n".join(lines)
+
+
+def parse_impact_lines(text: str, targets: List["ImpactTarget"]) -> Optional[List[dict]]:
+    """Matches the model's `Label: sentence` lines back to the targets that were
+    asked about.
+
+    Returns None when the model did not answer for every target, or answered
+    with a label that was never supplied. Both are refusals rather than partial
+    results: an impact list that silently drops an upstream object would tell a
+    reviewer there is nothing to check there, which is a different claim from
+    "the model did not answer".
+    """
+    def normalise(label: str) -> str:
+        # The prompt presents each object as "Label (n recorded)", and the model
+        # reasonably echoes that whole string back as its line label. Matching on
+        # the label alone accepts both forms rather than refusing a well-formed
+        # answer over a parenthetical.
+        return re.sub(r"\s*\([^)]*\)\s*$", "", label).strip().lower()
+
+    by_label = {normalise(target.label): target for target in targets}
+    found: dict = {}
+
+    for raw in text.splitlines():
+        line = raw.strip().lstrip("-*• ").strip()
+        if not line or ":" not in line:
+            continue
+        label, _, sentence = line.partition(":")
+        target = by_label.get(normalise(label))
+        if target is None:
+            return None  # a label nobody asked about
+        sentence = sentence.strip()
+        if sentence and target.domain not in found:
+            found[target.domain] = sentence
+
+    if len(found) != len(targets):
+        return None
+    return [{"domain": t.domain, "reasoning": found[t.domain]} for t in targets]
 
 
 NUMBER_PATTERN = re.compile(r"\d[\d,]*(?:\.\d+)?")
@@ -303,6 +422,71 @@ def narrative(request: NarrativeRequest) -> NarrativeResponse:
     usage = getattr(result, "usage_metadata", None)
     return NarrativeResponse(
         text=text,
+        provider=PROVIDER,
+        model=model_name(),
+        inputTokens=getattr(usage, "prompt_token_count", None) if usage else None,
+        outputTokens=getattr(usage, "candidates_token_count", None) if usage else None,
+        latencyMs=latency_ms,
+    )
+
+
+@app.post("/api/impact", response_model=ImpactResponse)
+def impact(request: ImpactRequest) -> ImpactResponse:
+    """AI reasoning about what a report edit implies for each upstream object.
+
+    Unlike `/api/narrative`, the result is not proposed as a change to any
+    record — it becomes the advisory text on the edit suggestion a human is
+    already being asked to decide on. The edit itself remains the thing under
+    approval; this only explains what to look at while deciding.
+    """
+    refresh_env()
+    client = gemini_client()
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured; see backend/.env.example.",
+        )
+
+    prompt = build_impact_prompt(request)
+
+    started = time.monotonic()
+    try:
+        from google.genai import types
+
+        result = client.models.generate_content(
+            model=model_name(),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=IMPACT_INSTRUCTION,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                temperature=0.2,
+            ),
+        )
+    except Exception as error:
+        logger.warning("Gemini impact request failed: %s", error)
+        raise HTTPException(status_code=502, detail="Model request failed.")
+    latency_ms = int((time.monotonic() - started) * 1000)
+
+    text = (getattr(result, "text", "") or "").strip()
+    impacts = parse_impact_lines(text, request.targets)
+    if impacts is None:
+        logger.warning("Refusing impact draft: did not answer for exactly the supplied objects.")
+        raise HTTPException(
+            status_code=502,
+            detail="Draft did not address exactly the supplied upstream objects.",
+        )
+
+    invented = ungrounded_numbers(" ".join(i["reasoning"] for i in impacts), prompt)
+    if invented:
+        logger.warning("Refusing ungrounded impact draft; figures not supplied: %s", invented)
+        raise HTTPException(
+            status_code=502,
+            detail="Draft stated figures absent from the supplied objects.",
+        )
+
+    usage = getattr(result, "usage_metadata", None)
+    return ImpactResponse(
+        impacts=[ImpactReasoning(**i) for i in impacts],
         provider=PROVIDER,
         model=model_name(),
         inputTokens=getattr(usage, "prompt_token_count", None) if usage else None,

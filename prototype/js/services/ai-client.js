@@ -199,6 +199,66 @@
         .catch(function () {
           return null;
         });
+    },
+
+    /**
+     * Requests AI reasoning about what a proposed report edit implies for each
+     * upstream object the section is generated from.
+     *
+     * Resolves to `{ impacts: [{ domain, reasoning }], provider, model, … }`,
+     * or to `null` on any failure — including a draft the backend refused for
+     * not addressing exactly the objects it was given. Callers keep the
+     * structural description they already have when this returns null, so the
+     * edit path never depends on the AI being reachable.
+     */
+    requestImpact: function (request) {
+      var payload = request || {};
+      if (!canFetch() || !payload.engagementId || !payload.sectionLabel ||
+          !payload.targets || payload.targets.length === 0) {
+        return Promise.resolve(null);
+      }
+
+      return fetchWithTimeout(baseUrl + '/api/impact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engagementId: payload.engagementId,
+          sectionLabel: payload.sectionLabel,
+          editText: payload.editText || '',
+          targets: payload.targets.map(function (target) {
+            return {
+              domain: target.domain || '',
+              label: target.label || '',
+              count: typeof target.count === 'number' ? target.count : 0,
+              present: Boolean(target.present)
+            };
+          })
+        })
+      }, NARRATIVE_TIMEOUT_MS)
+        .then(function (response) {
+          if (!response || !response.ok) {
+            return null;
+          }
+          return response.json();
+        })
+        .then(function (body) {
+          if (!body || !Array.isArray(body.impacts) || body.impacts.length === 0) {
+            return null;
+          }
+          return {
+            impacts: body.impacts.map(function (entry) {
+              return { domain: entry.domain || '', reasoning: String(entry.reasoning || '').trim() };
+            }).filter(function (entry) { return entry.domain && entry.reasoning; }),
+            provider: body.provider || '',
+            model: body.model || '',
+            inputTokens: typeof body.inputTokens === 'number' ? body.inputTokens : null,
+            outputTokens: typeof body.outputTokens === 'number' ? body.outputTokens : null,
+            latencyMs: typeof body.latencyMs === 'number' ? body.latencyMs : null
+          };
+        })
+        .catch(function () {
+          return null;
+        });
     }
   };
 })(window);
