@@ -71,7 +71,18 @@
     { name: 'suggestions',      collectionId: 'suggestions' },
     { name: 'engagementContext', collectionId: 'engagement-context' },
     { name: 'dependencies',     collectionId: 'dependencies' },
-    { name: 'industryKnowledge', collectionId: 'industry-knowledge' }
+    { name: 'industryKnowledge', collectionId: 'industry-knowledge' },
+    // The three operational collections that had no repository entry, closing
+    // the coverage gap the README records as a known limitation. Their records
+    // were already loaded and read through the Shared Audit State; what was
+    // absent was the audited write path, and without it a Suggestion's
+    // `applyTarget` naming one of them would resolve to an undefined
+    // repository and silently write nothing on Apply — the suggestion marked
+    // Applied with the record unchanged, which is the worst shape a failure
+    // can take in an approval trail.
+    { name: 'findings',         collectionId: 'findings' },
+    { name: 'testing',          collectionId: 'testing' },
+    { name: 'samples',          collectionId: 'samples' }
   ];
 
   /** Returns the value when it is an array, otherwise an empty array. */
