@@ -337,10 +337,10 @@ This is the most direct answer to "how much of the AI vision is actually built?"
 | Human Approval Engine (the conscience) | none | **Not implemented** |
 | Memory & Knowledge Architecture | `industry-knowledge.js` (1 of 5 layers) | **Partially implemented** |
 | Orchestration Architecture (the scheduler) | none (`dependency-service.js` models data/sequence only) | **Not implemented** — the widest gap found |
-| Explainability Engine | `ai-lineage-service.js` | **Implemented** — zero populated demo records |
-| AI Agents (all seven) | none | **Not implemented** — named and specified below |
+| Explainability Engine | `ai-lineage-service.js` | **Implemented** — populated by the Narrative Agent on approval; zero records in the seeded dataset |
+| AI Agents (all seven) | `narrative-agent.js` (1 of 7) | **Partially implemented** — the Documentation agent drafts Section III; the other six are named and specified below |
 
-The pattern across all nine rows is consistent: Release 1 is thorough about the *mechanics* of governance — writes are audited, propagation is deterministic, lifecycles are enforced — and honest about the absence of intelligence behind them.
+Eight of these nine rows are unchanged: Release 1 remains thorough about the *mechanics* of governance — writes are audited, propagation is deterministic, lifecycles are enforced — and honest about the absence of intelligence behind them. The ninth is where that changed. The Narrative Agent is a real model call, and it landed without altering a single one of the mechanics rows: it drafts, it proposes, and a human decides. The Human Approval Engine is still marked *not implemented* because no general engine exists — what exists is the Suggestion lifecycle carrying one agent's output, which is the substrate such an engine would be built on rather than the engine itself.
 
 ```mermaid
 graph TD
@@ -368,7 +368,7 @@ graph TD
 
 ## Release 2 AI Vision
 
-Seven named AI agents make Release 2 more than infrastructure — each stateless, event-driven, and permanently gated behind human approval. Roughly half already have a precise landing point in Release 1 code; half would require first choosing where in the existing workspace an AI-authored recommendation attaches:
+Seven named AI agents make Release 2 more than infrastructure — each stateless, event-driven, and permanently gated behind human approval. The first, Documentation, is implemented: `narrative-agent.js` drafts Section III's prose and files it as a Suggestion for human decision. The remaining six follow the same shape with different inputs and a different apply target; roughly half already have a precise landing point in Release 1 code, and half would require first choosing where in the existing workspace an AI-authored recommendation attaches:
 
 ```mermaid
 graph LR
@@ -393,7 +393,7 @@ graph LR
 
 | Agent | Synchronization Bus event | Plug-in point | Specificity |
 |---|---|---|---|
-| Documentation | `CONTEXT_UPDATED` / `REPORT_UPDATED` | `reportGenerationService.draftNarrative` | Named function, currently returns `null` |
+| Documentation | `CONTEXT_UPDATED` / `REPORT_UPDATED` | `narrative-agent.js` → Suggestion → `reportGenerationService.draftNarrative` | **Implemented** — drafts Section III, publishes on approval |
 | Walkthrough | `WALKTHROUGH_UPDATED` | `dependency-service.js`'s live-derivation comment | Comment only, no reserved function |
 | Controls | `CONTROLS_UPDATED` | `controls.js`'s Appendix A comment | Comment only, no reserved function |
 | Evidence | `EVIDENCE_UPDATED` | `ai-lineage-service.js`'s `aiLineage`/`origin` block | Named data contract, zero populated records |
@@ -413,7 +413,7 @@ graph TD
     RGS --> S3["III — System Description<br/>(generated)"]
     RGS --> S4["IV — Testing Results<br/>(generated)"]
     RGS --> S5["V — Entity Information<br/>(generated, not audited)"]
-    S3 -.->|"draftNarrative seam — returns null today"| DN["AI-authored prose — Release 2"]
+    S3 -.->|"narrative-agent.js drafts → Suggestion → human approval"| DN["AI-authored prose — implemented"]
     RGS --> RPS["report-propagation-service.js"]
     RPS -.->|"describeImpact seam — already returns templated text"| DI["AI reasoning about upstream impact — Release 2"]
 ```
@@ -433,6 +433,28 @@ Release 1 requires **nothing** to run:
 ```
 
 No `npm install`, no build step, no dev server, no internet connection. `prototype/vendor/` contains exactly two vendored libraries (Bootstrap and Bootstrap Icons), loaded locally — every script is a classic `<script src="...">` tag, deliberately never an ES Module, specifically so the application works correctly opened straight from `file://`.
+
+### Optional — enabling AI narrative drafting
+
+The application above is complete without this. Running the AI backend adds one thing: the Narrative Agent drafts Section III's prose for human approval.
+
+```text
+1. pip install -r backend/requirements.txt
+2. cp backend/.env.example backend/.env   # then add your Gemini API key
+3. uvicorn main:app --host 127.0.0.1 --port 8787 --app-dir backend --reload --reload-dir backend
+4. Open prototype/index.html and visit an engagement's Reporting workspace
+```
+
+`--reload` restarts the service when its Python changes. Configuration in
+`backend/.env` needs no restart at all — the service re-reads it on every
+request, so adding, removing, or rotating the key takes effect immediately.
+Confirm which key the service is actually using with `curl -s
+localhost:8787/api/health`: `"configured": true` means a key is loaded in the
+running process, which is the only thing that determines whether AI is on.
+
+The backend binds to loopback and holds two things the browser must never see: the model credential, and the prompt whose grounding constraint keeps a draft honest. Stop it and the application returns to the behaviour above — every AI call resolves to nothing, and the report renders exactly as it does with no AI at all.
+
+Backend tests run on the Python standard library alone: `python3 -m unittest discover -s backend`.
 
 ```mermaid
 graph LR
@@ -506,8 +528,8 @@ Verified constraints of Release 1 as it exists today, independent of any Release
 
 - **All data is in-memory only.** A page reload or the Reset control discards every write back to the seeded demo dataset. Nothing is written to disk, a database, or a server — `repository.js`'s simulated `SIM-`-prefixed writes are the entire persistence model, because a portable `file://` `index.html` cannot reliably write files.
 - **There is no authentication and no real access control.** A session's identity and capabilities are fixed at load time; `permissions.js` documents itself as gating *visibility*, not authorization.
-- **There is no backend and no multi-user collaboration.** Release 1 runs entirely in one browser tab; two people opening it — or the same person in two tabs — never see each other's writes.
-- **No AI agent executes anywhere in Release 1.** Every AI-labeled surface either operates on authored, static demo data or renders an honest empty state.
+- **There is no application backend and no multi-user collaboration.** Release 1 runs entirely in one browser tab; two people opening it — or the same person in two tabs — never see each other's writes. The one server-side component, `backend/`, exists solely to hold the model credential for AI drafting; it stores nothing and knows nothing about engagements.
+- **One AI agent executes, and only when you run the backend.** The Narrative Agent drafts Section III's prose from the recorded facts that section is generated from. Every other AI-labeled surface still operates on authored, static demo data or renders an honest empty state. With `backend/` stopped — the default — no model is called anywhere and the application behaves exactly as it did before AI existed.
 - **The Repository Foundation does not yet cover every business-data read.** Nine workspace files plus the header component read some collections directly rather than through a repository, and three collections have no repository entry at all yet.
 - **Architectural boundaries are enforced by convention, not tooling.** Release 1 has no build step, linter, or type system — boundaries hold only as far as consistent authorship keeps them.
 - **Three registered workspace identities have no workspace behind them.** `GOVERNANCE`, `AI`, and `EXECUTIVE` are declared in the router's registry but unreachable from any menu, breadcrumb, or link.
@@ -522,10 +544,13 @@ The full comparative analysis behind each of these — implemented behavior, doc
 Neither, exactly. It's a fully functional, offline-capable prototype of the operational platform — real navigation, a real data model, real audited writes for three workflows (Walkthrough, both wizards, Global Approvals), and 919 passing tests. What it is *not* is a live, multi-user, persistent, AI-powered system — that's Release 2.
 
 **Does the AI actually work today?**
-No. Every AI-shaped surface — Suggestions, AI Lineage, the report's `draftNarrative`/`describeImpact` seams — is a real, reserved extension point with an honest empty state, not a live model call. See [Release 1 vs. Release 2](#release-1-vs-release-2--the-seam-inventory).
+One agent does. Run `backend/` with a Gemini key and the Narrative Agent drafts Section III's prose from that section's recorded facts, files it as a Suggestion, and publishes it only once a human approves — with AI lineage recorded against the section at that point. Every other AI-shaped surface — the other six agents, `describeImpact`, the Suggestion confidence field — remains a reserved extension point with an honest empty state. See [Release 1 vs. Release 2](#release-1-vs-release-2--the-seam-inventory).
 
-**Why no backend?**
-Release 1's explicit goal was proving the operating model — navigation, hierarchy, synchronization, governance mechanics, data shape — before committing to a backend, an AI provider, or a persistence strategy. A static prototype that runs from `file://` with zero installation is a genuine constraint the architecture was built to satisfy, not a limitation that slipped in by accident.
+**Can the AI put something wrong in a report?**
+Not without a person approving it, and not silently. A draft is grounded in the section's recorded facts by construction: the backend rejects any draft stating a figure those facts do not contain, so a fabricated number is refused rather than returned. What survives that check is still only a proposal — it appears in the Reporting inspector awaiting a decision, and reaches neither the report nor any export until it is approved and applied.
+
+**Why is the backend so small?**
+It holds the model credential and the prompt, and nothing else. Anything in `prototype/` is readable by every user, so a key there is a published key and a prompt there is one any user can rewrite — including the constraint that keeps a draft grounded. Everything else about Release 1 stays as it was: navigation, hierarchy, synchronization, governance mechanics, and data shape are all still proven in a static prototype that runs from `file://` with zero installation.
 
 **Why SOC 2 first?**
 So the architecture, UX, and AI orchestration model can mature on one bounded, well-understood assurance framework before other frameworks (ISO 27001, PCI DSS, HIPAA, internal audit) are added as extensions rather than requiring a redesign.

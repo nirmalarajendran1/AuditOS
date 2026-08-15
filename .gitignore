@@ -3,3 +3,9 @@ graphify-out/
 prototype/tests
 /.mcp.json
 /CLAUDE.md
+
+# AI backend — the model credential must never be committed.
+backend/.env
+backend/__pycache__/
+backend/.venv/
+*.pyc

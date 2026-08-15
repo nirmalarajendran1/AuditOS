@@ -816,7 +816,7 @@
     if (suggestions.length === 0) {
       suggestionBody = P.emptyState({
         icon: '✦', title: 'No suggestions in flight',
-        description: 'Proposed changes to this section enter the Suggested → Reviewed → Approved → Applied workflow and appear here. Release 2 adds AI-drafted section wording through the same path; AI stays advisory and human approval stays mandatory.'
+        description: 'Proposed changes to this section enter the Suggested → Reviewed → Approved → Applied workflow and appear here. AI-drafted section wording travels the same path; AI stays advisory and human approval stays mandatory.'
       });
       suggestionBody.classList.add('aos-tint-brand');
     } else {
@@ -1171,6 +1171,31 @@
       return;
     }
     renderReady(view, viewModel);
+    requestNarrativeDraft(viewModel);
+  }
+
+  /**
+   * Asks the Narrative Agent to draft the System Description's prose.
+   *
+   * Fired after the render, never before it: drafting is a network round trip
+   * and the report must never wait on one. The agent declines by itself when
+   * there is nothing to do — no AI backend, no recorded facts, a narrative
+   * already approved, or a draft already awaiting a decision — so this stays a
+   * single unconditional call. A filed draft is a state write, which republishes
+   * and re-renders this workspace through the ordinary state subscription, and
+   * the drafted paragraph appears in the inspector as a suggestion awaiting
+   * review. Nothing reaches the report itself until a human approves it.
+   */
+  function requestNarrativeDraft(viewModel) {
+    var agent = AuditOS.narrativeAgent;
+    if (!agent || !viewModel || !viewModel.engagement || !viewModel.report) {
+      return;
+    }
+    asArray(viewModel.report.sections).forEach(function (section) {
+      if (section.key === agent.SECTION_KEY) {
+        agent.requestDraft({ engagementId: viewModel.engagement.id, section: section });
+      }
+    });
   }
 
   AuditOS.reportingWorkspace = {

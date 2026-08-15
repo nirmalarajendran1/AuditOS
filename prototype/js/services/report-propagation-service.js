@@ -61,6 +61,18 @@
   /** The suggestion category every report-originated proposal carries. */
   var CATEGORY = 'report-edit';
 
+  /**
+   * The AI-drafted narrative category (`js/services/narrative-agent.js`).
+   * A drafted paragraph is a proposed change to a report section, so it
+   * travels this same Suggestion → Approval → Propagation path and appears in
+   * the same registers — but it keeps its own category so the audit trail
+   * distinguishes prose an agent drafted from an edit a person proposed.
+   */
+  var NARRATIVE_CATEGORY = 'report-narrative';
+
+  /** Every category that originates against a report section. */
+  var REPORT_CATEGORIES = [CATEGORY, NARRATIVE_CATEGORY];
+
   /** Returns the value when it is an array, otherwise an empty array. */
   function asArray(value) {
     return Array.isArray(value) ? value : [];
@@ -225,7 +237,7 @@
       return [];
     }
     return service.list(repository, engagementId).filter(function (suggestion) {
-      if (suggestion.category !== CATEGORY) {
+      if (REPORT_CATEGORIES.indexOf(suggestion.category) === -1) {
         return false;
       }
       if (!sectionId) {
@@ -254,6 +266,8 @@
   AuditOS.reportPropagationService = {
     PROPAGATION_TARGETS: PROPAGATION_TARGETS,
     CATEGORY: CATEGORY,
+    NARRATIVE_CATEGORY: NARRATIVE_CATEGORY,
+    REPORT_CATEGORIES: REPORT_CATEGORIES,
 
     targetFor: targetFor,
     analyzeImpact: analyzeImpact,

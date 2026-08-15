@@ -180,7 +180,11 @@
       category: proposal.category || 'change-proposal',
       status: STATUS.SUGGESTED,
       confidence: null,
-      suggestedBy: sessionLabel() || 'User',
+      // Attribution is the proposer's to declare: an AI agent files under its
+      // provider, a person under the acting session. Recording a drafting
+      // agent's proposal against the reviewer who happened to be signed in
+      // would put a false author in an immutable audit trail.
+      suggestedBy: proposal.suggestedBy || sessionLabel() || 'User',
       suggestedOn: todayIso(),
       reviewedByLabel: '',
       reviewedOn: '',
@@ -192,7 +196,7 @@
       recommendations: asArray(proposal.recommendations),
       affectedRequirements: asArray(proposal.affectedRequirements),
       affectedControls: asArray(proposal.affectedControls),
-      affectedReportSections: [],
+      affectedReportSections: asArray(proposal.affectedReportSections),
       auditReferences: asArray(proposal.auditReferences),
       applyTarget: proposal.applyTarget || null
     };

@@ -29,6 +29,18 @@ Do NOT copy framework code.
 
 ---
 
+Scope of these rules
+
+These rules govern `prototype/` — the application the user opens. They do NOT
+govern `backend/`, the optional Python service that holds the AI model
+credential and grounding prompt. That code never reaches the browser, is never
+required to run the application, and uses pip dependencies deliberately.
+
+`prototype/` must keep working with `backend/` stopped. Any AI path there
+degrades to the no-AI behaviour rather than erroring.
+
+---
+
 Implementation Rules
 
 The implementation MUST use ONLY:

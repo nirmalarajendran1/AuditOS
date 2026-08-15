@@ -41,6 +41,8 @@ const SCRIPTS = {
   reportVersion: ['js', 'services', 'report-version-service.js'],
   reportPropagation: ['js', 'services', 'report-propagation-service.js'],
   documentExport: ['js', 'services', 'document-export.js'],
+  aiClient: ['js', 'services', 'ai-client.js'],
+  narrativeAgent: ['js', 'services', 'narrative-agent.js'],
   demoDataBundle: ['demo-data', 'demo-data.js'],
   demoDataRegistry: ['js', 'state', 'demo-data-registry.js'],
   stateStore: ['js', 'state', 'state-store.js'],
@@ -240,6 +242,23 @@ function loadReportGenerationService() {
 }
 
 /**
+ * Loads the AI Foundation (window.AuditOS.aiClient and .narrativeAgent) over
+ * the Suggestion Lifecycle Service and Repository the agent proposes through.
+ * Returns the populated window so a suite can stub `aiClient` and observe what
+ * the agent files. No network is reachable in the sandbox — `fetch` is absent —
+ * so the client degrades to its null path exactly as it does with no AI backend
+ * running, which is the behaviour these suites assert on.
+ */
+function loadAiFoundation() {
+  return loadClassicScripts([
+    SCRIPTS.idService, SCRIPTS.permissions, SCRIPTS.auditService,
+    SCRIPTS.demoDataBundle, SCRIPTS.demoDataRegistry, SCRIPTS.stateStore,
+    SCRIPTS.repository, SCRIPTS.suggestionService,
+    SCRIPTS.aiClient, SCRIPTS.narrativeAgent
+  ]).AuditOS;
+}
+
+/**
  * Loads the Document Export service (window.AuditOS.documentExport) over the
  * Workbook Export ZIP writer it composes and the Report Generation Service
  * whose model it serializes. Returns the populated window so a suite can reach
@@ -387,6 +406,7 @@ module.exports = {
   loadFindingsWorkspace: loadFindingsWorkspace,
   loadReportingWorkspace: loadReportingWorkspace,
   loadReportGenerationService: loadReportGenerationService,
+  loadAiFoundation: loadAiFoundation,
   loadDocumentExport: loadDocumentExport,
   loadProgramWorkspace: loadProgramWorkspace,
   loadPermissions: loadPermissions,

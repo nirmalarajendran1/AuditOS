@@ -46,12 +46,14 @@
  * back to the source object.
  *
  * Release 1 / Release 2 seam: this service derives the report's *structure and
- * bindings* from recorded state. Release 2 replaces `draftNarrative` — the one
- * clearly marked extension point below — with real AI-authored prose for the
- * narrative sections; every other contract here (section identity, lineage,
- * regeneration scoping, status vocabulary) is unchanged when that happens, and
- * human approval stays mandatory because narrative changes still travel the
- * Suggestion → Approval → Propagation path (see report-propagation-service.js).
+ * bindings* from recorded state. `draftNarrative` — the one clearly marked
+ * extension point below — now returns AI-authored prose for the narrative
+ * sections, but only prose a human has approved: the drafting itself belongs to
+ * `js/services/narrative-agent.js`, which files every draft as a Suggestion.
+ * Every other contract here (section identity, lineage, regeneration scoping,
+ * status vocabulary) is unchanged by that, and human approval stays mandatory
+ * because narrative changes still travel the Suggestion → Approval →
+ * Propagation path (see report-propagation-service.js).
  *
  * Pure derivation: no DOM, no `AuditOS.state`, no writes. Depends on nothing in
  * components/, keeping the js → components boundary one-way. Loaded as a
@@ -406,18 +408,30 @@
   }
 
   /**
-   * Release 2 extension point — AI narrative drafting.
+   * The section's narrative prose: the drafted paragraph a human has approved,
+   * or null when there is none.
    *
-   * Release 1 returns null: no narrative is invented, so a narrative section
-   * with no recorded content renders its honest placeholder. Release 2 replaces
-   * this one function with the AI drafting call that authors the section's prose
-   * from `blocks` (the recorded facts the section is generated from). Its
-   * output still enters the report only through the Suggestion → Approval →
-   * Propagation path, so human approval remains mandatory and nothing here
-   * writes directly.
+   * This function does not call a model. Drafting is asynchronous and every
+   * draft is a proposal, so it belongs to `AuditOS.narrativeAgent`, which
+   * authors prose from `blocks` (the recorded facts the section is generated
+   * from) and files it as a Suggestion carrying the concrete write to perform
+   * on Apply. Approving that suggestion is what puts `narrative` on the section
+   * record; this function reads it back. Nothing here writes, so human approval
+   * remains mandatory and an unapproved draft appears nowhere in the report or
+   * its exports.
+   *
+   * Returning null keeps the pre-AI behaviour exactly intact: a narrative
+   * section with no approved content renders its honest placeholder rather than
+   * invented prose, whether that is because nothing was drafted, nothing was
+   * approved, or no AI backend is running at all.
    */
-  function draftNarrative(/* sectionKey, blocks, context */) {
-    return null;
+  function draftNarrative(sectionKey, blocks, context, record) {
+    var source = record || {};
+    if (typeof source.narrative !== 'string') {
+      return null;
+    }
+    var text = source.narrative.trim();
+    return text ? text : null;
   }
 
   // ------------------------------------------------------------------
@@ -492,7 +506,7 @@
     switch (definition.key) {
       case 'system-description':
         section.blocks = buildSystemDescriptionBlocks(ops);
-        section.narrative = draftNarrative(definition.key, section.blocks, context);
+        section.narrative = draftNarrative(definition.key, section.blocks, context, record);
         section.present = section.blocks.some(function (block) { return block.present; });
         break;
       case 'testing-results':

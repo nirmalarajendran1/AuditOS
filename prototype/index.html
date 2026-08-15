@@ -256,6 +256,31 @@
   <script src="js/platform/suggestion-service.js"></script>
 
   <!-- ========================================================= -->
+  <!-- AI Foundation                                             -->
+  <!-- AiClient (the platform's single outbound-call surface —   -->
+  <!-- transport only, holding no prompt and no model id) and    -->
+  <!-- NarrativeAgent (the first agent: drafts a report          -->
+  <!-- section's prose from the recorded facts the section is    -->
+  <!-- generated from, and files every draft as a Suggestion     -->
+  <!-- carrying the concrete write to perform on Apply — nothing -->
+  <!-- reaches the report without a human decision).             -->
+  <!--                                                           -->
+  <!-- Both are optional. With no AI backend running, every call -->
+  <!-- resolves to null and the application behaves exactly as   -->
+  <!-- it did before AI existed, so index.html still opens       -->
+  <!-- straight from file:// with nothing installed. The model   -->
+  <!-- credential and the grounding prompt live in backend/ and  -->
+  <!-- never reach the browser, because a prompt the browser can -->
+  <!-- read is a prompt any user can rewrite.                    -->
+  <!--                                                           -->
+  <!-- Loads after the Suggestion Lifecycle Service and the      -->
+  <!-- Repository, which the agent proposes and writes through,  -->
+  <!-- and before the workspace modules that trigger it.         -->
+  <!-- ========================================================= -->
+  <script src="js/services/ai-client.js"></script>
+  <script src="js/services/narrative-agent.js"></script>
+
+  <!-- ========================================================= -->
   <!-- Workspace Shared Platform (Issue #27)                    -->
   <!-- Harmonized helpers reused by every operational workspace: -->
   <!-- shared constants, DOM builders (section, health strip,    -->

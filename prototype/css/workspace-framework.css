@@ -472,14 +472,27 @@
  * the same graceful degradation the flush-canvas opt-in already relies on.
  * ======================================== */
 
+/* The viewport shell fills the host and lets its own panes scroll — but only
+ * while the host is tall enough to leave the operational panes usable. Below
+ * that the shell would compress the workbench into an unreadable strip with no
+ * way to reach what it clipped, which is worse than a scrollbar: on a short
+ * window (or at high browser zoom) the chrome alone can consume most of the
+ * frame. So the panes keep a floor (`--aos-viewport-workbench-floor`, applied
+ * to the compositions below) and the host scrolls when honouring that floor
+ * makes the shell taller than the frame.
+ *
+ * On a window with room this changes nothing: the shell still fits exactly,
+ * the host never scrolls, and every scrollbar still belongs to a pane. */
 .aos-workspace-host__body:has(.aos-workspace-framework--viewport) {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-block: var(--aos-space-4);
 }
 
 .aos-workspace-host__body:has(.aos-workspace-framework--viewport) > .aos-router-outlet {
-  height: 100%;
-  min-height: 0;
+  /* `min-height` rather than `height` so the outlet fills the frame in the
+   * normal case and grows past it when the floor demands. */
+  min-height: 100%;
 }
 
 .aos-workspace-host__body .aos-workspace-view:has(.aos-workspace-framework--viewport) {
@@ -502,7 +515,10 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  /* Not `hidden`: the pane floor above must be able to push the shell past the
+   * frame, where the host body's scrollbar takes over. Clipping here would
+   * reinstate exactly the unreachable content the floor exists to prevent. */
+  overflow: visible;
 }
 
 .aos-workspace-framework--viewport .aos-workspace-framework__content > [data-canvas='flush'] {
@@ -517,6 +533,21 @@
 .aos-workspace-framework--viewport .aos-master-detail {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* The floor the shell's scroll behaviour above is built around: the smallest
+ * height at which a three-pane Workbench or a Master–Detail is still worth
+ * rendering — roughly a heading and a few rows per pane. Above it the shell
+ * behaves exactly as before; below it the compositions stop shrinking and the
+ * host body scrolls instead. Applied to the compositions rather than the shell
+ * so a workspace whose canvas is a single flowing panel is unaffected. */
+.aos-workspace-framework--viewport {
+  --aos-viewport-workbench-floor: 22rem;
+}
+
+.aos-workspace-framework--viewport .aos-workbench,
+.aos-workspace-framework--viewport .aos-master-detail {
+  min-height: var(--aos-viewport-workbench-floor);
 }
 
 .aos-workspace-framework--viewport .aos-master-detail__list,

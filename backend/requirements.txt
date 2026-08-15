@@ -1,0 +1,14 @@
+# AuditOS AI Backend — pinned dependencies.
+#
+# Install:  pip install -r backend/requirements.txt
+# Run:      uvicorn main:app --host 127.0.0.1 --port 8787 --app-dir backend
+#
+# This backend exists solely to hold the Gemini API key server-side. The
+# prototype under prototype/ remains dependency-free and still opens directly
+# from file:// with no installation — the AI narrative is simply absent when
+# this service is not running.
+
+fastapi==0.115.6
+uvicorn==0.34.0
+google-genai==0.3.0
+python-dotenv==1.0.1
