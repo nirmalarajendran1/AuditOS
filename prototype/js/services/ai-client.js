@@ -259,6 +259,57 @@
         .catch(function () {
           return null;
         });
+    },
+
+    /**
+     * Requests a drafted test procedure for one control.
+     *
+     * Resolves to `{ text, provider, model, … }`, or to `null` on any failure —
+     * including a draft the backend refused for citing a criterion or control
+     * it was never given. Callers treat `null` as "no procedure drafted", which
+     * is the state the workpaper already renders correctly.
+     */
+    requestProcedure: function (request) {
+      var payload = request || {};
+      if (!canFetch() || !payload.engagementId || !payload.testId ||
+          !payload.controlDescription) {
+        return Promise.resolve(null);
+      }
+
+      return fetchWithTimeout(baseUrl + '/api/procedure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engagementId: payload.engagementId,
+          testId: payload.testId,
+          controlCode: payload.controlCode || '',
+          controlTitle: payload.controlTitle || '',
+          controlDescription: payload.controlDescription,
+          criteriaIds: (payload.criteriaIds || []).map(String)
+        })
+      }, NARRATIVE_TIMEOUT_MS)
+        .then(function (response) {
+          if (!response || !response.ok) {
+            return null;
+          }
+          return response.json();
+        })
+        .then(function (body) {
+          if (!body || typeof body.text !== 'string' || !body.text.trim()) {
+            return null;
+          }
+          return {
+            text: body.text.trim(),
+            provider: body.provider || '',
+            model: body.model || '',
+            inputTokens: typeof body.inputTokens === 'number' ? body.inputTokens : null,
+            outputTokens: typeof body.outputTokens === 'number' ? body.outputTokens : null,
+            latencyMs: typeof body.latencyMs === 'number' ? body.latencyMs : null
+          };
+        })
+        .catch(function () {
+          return null;
+        });
     }
   };
 })(window);

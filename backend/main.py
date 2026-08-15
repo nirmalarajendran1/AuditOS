@@ -6,7 +6,7 @@ static, offline application served from `file://` or a plain static server;
 anything it can read, every user can read, so the Gemini key and the prompt
 that constrains the model both live here instead.
 
-Two endpoints do work, one per agent:
+Three endpoints do work, one per agent:
 
   POST /api/narrative — drafts the prose paragraph for a report section from
       the recorded facts that section is generated from. Its output is proposed
@@ -15,6 +15,9 @@ Two endpoints do work, one per agent:
       upstream object the section draws on. Its output is advisory text on the
       edit suggestion a human is already deciding on; it proposes no change of
       its own.
+  POST /api/procedure — drafts the test procedure for one control from that
+      control's own description. Proposed as a change to the workpaper and
+      published only on human approval.
 
 Neither is a general-purpose model proxy: request shapes are validated, the
 section allow-list is closed, each prompt is assembled server-side so a browser
@@ -148,6 +151,39 @@ Format rules:
 
 Return only those lines."""
 
+# The test-procedure constraint (testing.js — 121 of 544 workpapers record no
+# procedure). A test procedure describes what the auditor will *do*: which
+# artefact to inspect, against which control, to establish what. It is not a
+# finding, and writing one is not performing it — which is why the strongest
+# rule here forbids stating any outcome. A drafted procedure that concludes
+# would put an untested result into a workpaper.
+PROCEDURE_INSTRUCTION = """\
+You are an assurance professional drafting the test procedure for one control \
+in a SOC 2 engagement.
+
+You will be given the control's identifier, title, description, and the \
+criteria it maps to. Write the procedure the auditor should perform to test \
+that control.
+
+Absolute rules:
+- Describe only what to DO: what to inspect, obtain, or observe, and what that \
+establishes. Never state a result, a conclusion, or whether the control is \
+effective — the test has not been performed.
+- Use only the control supplied. Name no other control, criterion, system, \
+team, vendor, or person than those in the control's own description.
+- Cite a criterion identifier only if it appears in the supplied criteria list.
+- Invent no counts, dates, sample sizes, or population figures.
+- If the description is too thin to write a meaningful procedure, say so \
+plainly in one sentence rather than inventing detail.
+
+Format rules:
+- One paragraph, 40 to 90 words. No line breaks, no bullets, no headings.
+- Plain text only. No Markdown.
+- Past or infinitive tense as an audit workpaper is written ("Inspect the …" \
+or "Inspected the …"), matching the tense of the description where possible.
+
+Return only the paragraph."""
+
 
 class NarrativeBlock(BaseModel):
     """One recorded fact, mirroring a block from buildSystemDescriptionBlocks."""
@@ -195,6 +231,24 @@ class ImpactReasoning(BaseModel):
 
 class ImpactResponse(BaseModel):
     impacts: List[ImpactReasoning]
+    provider: str
+    model: str
+    inputTokens: Optional[int] = None
+    outputTokens: Optional[int] = None
+    latencyMs: int
+
+
+class ProcedureRequest(BaseModel):
+    engagementId: str = Field(min_length=1, max_length=200)
+    testId: str = Field(min_length=1, max_length=200)
+    controlCode: str = Field(default="", max_length=100)
+    controlTitle: str = Field(default="", max_length=400)
+    controlDescription: str = Field(min_length=1, max_length=4000)
+    criteriaIds: List[str] = Field(default_factory=list, max_length=40)
+
+
+class ProcedureResponse(BaseModel):
+    text: str
     provider: str
     model: str
     inputTokens: Optional[int] = None
@@ -327,6 +381,30 @@ def parse_impact_lines(text: str, targets: List["ImpactTarget"]) -> Optional[Lis
     if len(found) != len(targets):
         return None
     return [{"domain": t.domain, "reasoning": found[t.domain]} for t in targets]
+
+
+# A SOC 2 criterion reference (CC6.1, A1.2, P8.1) and a control code (CSC-01,
+# NXSC-02). Both are identifiers a reader would follow to another object, so a
+# drafted procedure citing one that was never supplied points the auditor at
+# the wrong control — a quiet error a reviewer is unlikely to catch by eye.
+CRITERION_PATTERN = re.compile(r"\b[A-Z]{1,3}\d+\.\d+\b")
+CONTROL_CODE_PATTERN = re.compile(r"\b[A-Z]{2,6}-\d{1,3}\b")
+
+
+def ungrounded_identifiers(procedure: str, allowed_criteria: List[str], allowed_codes: List[str]) -> List[str]:
+    """Criterion and control identifiers the procedure cites that it was not
+    given. Returned sorted so a log line is stable."""
+    criteria_ok = {value.strip().upper() for value in allowed_criteria if value}
+    codes_ok = {value.strip().upper() for value in allowed_codes if value}
+    found = set()
+    for match in CRITERION_PATTERN.finditer(procedure):
+        if match.group(0).upper() not in criteria_ok:
+            found.add(match.group(0))
+    for match in CONTROL_CODE_PATTERN.finditer(procedure):
+        token = match.group(0).upper()
+        if token not in codes_ok and token not in criteria_ok:
+            found.add(match.group(0))
+    return sorted(found)
 
 
 NUMBER_PATTERN = re.compile(r"\d[\d,]*(?:\.\d+)?")
@@ -487,6 +565,81 @@ def impact(request: ImpactRequest) -> ImpactResponse:
     usage = getattr(result, "usage_metadata", None)
     return ImpactResponse(
         impacts=[ImpactReasoning(**i) for i in impacts],
+        provider=PROVIDER,
+        model=model_name(),
+        inputTokens=getattr(usage, "prompt_token_count", None) if usage else None,
+        outputTokens=getattr(usage, "candidates_token_count", None) if usage else None,
+        latencyMs=latency_ms,
+    )
+
+
+@app.post("/api/procedure", response_model=ProcedureResponse)
+def procedure(request: ProcedureRequest) -> ProcedureResponse:
+    """Drafts the test procedure for one control.
+
+    Proposed as a change to the workpaper and published only on human approval,
+    like the narrative. The identifier check below is what makes it safe to
+    review quickly: a procedure that cites a criterion or control it was never
+    given is refused outright, because that is exactly the error a reviewer
+    skims past.
+    """
+    refresh_env()
+    client = gemini_client()
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured; see backend/.env.example.",
+        )
+
+    criteria = ", ".join(request.criteriaIds) if request.criteriaIds else "(none recorded)"
+    prompt = (
+        f"Control code: {request.controlCode or '(not recorded)'}\n"
+        f"Control title: {request.controlTitle or '(not recorded)'}\n"
+        f"Criteria: {criteria}\n"
+        f"Control description: {request.controlDescription.strip()}"
+    )
+
+    started = time.monotonic()
+    try:
+        from google.genai import types
+
+        result = client.models.generate_content(
+            model=model_name(),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=PROCEDURE_INSTRUCTION,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                temperature=0.2,
+            ),
+        )
+    except Exception as error:
+        logger.warning("Gemini procedure request failed: %s", error)
+        raise HTTPException(status_code=502, detail="Model request failed.")
+    latency_ms = int((time.monotonic() - started) * 1000)
+
+    text = enforce_single_paragraph(getattr(result, "text", "") or "")
+    if not text:
+        raise HTTPException(status_code=502, detail="Model returned no usable text.")
+
+    stray = ungrounded_identifiers(text, request.criteriaIds, [request.controlCode])
+    if stray:
+        logger.warning("Refusing procedure citing unsupplied identifiers: %s", stray)
+        raise HTTPException(
+            status_code=502,
+            detail="Draft cited criteria or controls that were not supplied.",
+        )
+
+    invented = ungrounded_numbers(text, prompt)
+    if invented:
+        logger.warning("Refusing ungrounded procedure; figures not supplied: %s", invented)
+        raise HTTPException(
+            status_code=502,
+            detail="Draft stated figures absent from the control description.",
+        )
+
+    usage = getattr(result, "usage_metadata", None)
+    return ProcedureResponse(
+        text=text,
         provider=PROVIDER,
         model=model_name(),
         inputTokens=getattr(usage, "prompt_token_count", None) if usage else None,

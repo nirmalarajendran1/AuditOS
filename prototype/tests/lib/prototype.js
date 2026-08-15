@@ -44,6 +44,7 @@ const SCRIPTS = {
   aiClient: ['js', 'services', 'ai-client.js'],
   narrativeAgent: ['js', 'services', 'narrative-agent.js'],
   impactAgent: ['js', 'services', 'impact-agent.js'],
+  testingAgent: ['js', 'services', 'testing-agent.js'],
   demoDataBundle: ['demo-data', 'demo-data.js'],
   demoDataRegistry: ['js', 'state', 'demo-data-registry.js'],
   stateStore: ['js', 'state', 'state-store.js'],
@@ -255,7 +256,8 @@ function loadAiFoundation() {
     SCRIPTS.idService, SCRIPTS.permissions, SCRIPTS.auditService,
     SCRIPTS.demoDataBundle, SCRIPTS.demoDataRegistry, SCRIPTS.stateStore,
     SCRIPTS.repository, SCRIPTS.suggestionService,
-    SCRIPTS.aiClient, SCRIPTS.narrativeAgent, SCRIPTS.impactAgent
+    SCRIPTS.aiClient, SCRIPTS.narrativeAgent, SCRIPTS.impactAgent,
+    SCRIPTS.testingAgent
   ]).AuditOS;
 }
 

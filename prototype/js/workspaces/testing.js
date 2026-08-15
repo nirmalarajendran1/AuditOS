@@ -1709,6 +1709,34 @@
    * — with the engagement-level testing health, progress, and audit chain in
    * the compact context band above it.
    */
+  /**
+   * Asks the Testing Agent to draft the selected workpaper's test procedure.
+   *
+   * Fired on selection rather than on render, and for the selected workpaper
+   * alone. The engagement has 121 workpapers recording no procedure; drafting
+   * all of them on load would spend a request on each and put 121 cards in
+   * front of a reviewer at once, which is how an approval gate stops being
+   * read. One card, for the record the auditor is actually looking at.
+   *
+   * The agent declines by itself when there is nothing to do — no AI backend, a
+   * procedure already recorded, no linked control, or a draft already awaiting
+   * a decision — so this stays a single unconditional call. A filed draft
+   * republishes and re-renders through the ordinary state subscription and
+   * appears in the review pane awaiting a decision; nothing reaches the
+   * workpaper until a human approves it.
+   */
+  function requestProcedureDraft(viewModel, row) {
+    var agent = AuditOS.testingAgent;
+    if (!agent || !row || !row.test || !viewModel || !viewModel.engagement) {
+      return;
+    }
+    agent.requestDraft({
+      engagementId: viewModel.engagement.id,
+      test: row.test,
+      control: row.control
+    });
+  }
+
   function renderReady(view, viewModel) {
     var P = presentation();
     var router = AuditOS.router;
@@ -1755,6 +1783,7 @@
       // are open for edit so an edit box never carries across records.
       boardState.editing = {};
       renderPanes();
+      requestProcedureDraft(viewModel, row);
     }
 
     // The route may name either a control or a workpaper record; both resolve

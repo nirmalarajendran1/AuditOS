@@ -40,6 +40,7 @@ HELPERS = _load_helpers()
 enforce_single_paragraph = HELPERS["enforce_single_paragraph"]
 parse_impact_lines = HELPERS["parse_impact_lines"]
 ungrounded_numbers = HELPERS["ungrounded_numbers"]
+ungrounded_identifiers = HELPERS["ungrounded_identifiers"]
 numbers_in = HELPERS["numbers_in"]
 
 FACTS = (
@@ -224,6 +225,45 @@ class ImpactGroundingTests(unittest.TestCase):
     def test_invented_count_is_caught(self):
         text = "Check the 40 outstanding evidence items."
         self.assertEqual(ungrounded_numbers(text, self.PROMPT), ["40"])
+
+
+class UngroundedIdentifiersTests(unittest.TestCase):
+    """A drafted procedure citing a criterion or control it was never given
+    points the auditor at the wrong object — and reads as researched rather
+    than invented, which is why a reviewer skims past it."""
+
+    CRITERIA = ["CC6.1", "CC6.6"]
+    CODES = ["CSC-01"]
+
+    def _check(self, text):
+        return ungrounded_identifiers(text, self.CRITERIA, self.CODES)
+
+    def test_supplied_identifiers_pass(self):
+        text = "Inspect the CSC-01 configuration to address CC6.1 and CC6.6."
+        self.assertEqual(self._check(text), [])
+
+    def test_unsupplied_criterion_is_caught(self):
+        text = "Inspect the configuration to address CC6.1 and CC7.2."
+        self.assertEqual(self._check(text), ["CC7.2"])
+
+    def test_unsupplied_control_code_is_caught(self):
+        text = "Inspect the configuration alongside CSC-04."
+        self.assertEqual(self._check(text), ["CSC-04"])
+
+    def test_case_insensitive_match_on_supplied_values(self):
+        self.assertEqual(self._check("Inspect cc6.1 for csc-01."), [])
+
+    def test_prose_without_identifiers_passes(self):
+        text = "Inspect the production configuration and obtain the approval record."
+        self.assertEqual(self._check(text), [])
+
+    def test_multiple_strays_are_all_reported(self):
+        text = "Covers CC7.2, A1.1 and control CSC-09."
+        self.assertEqual(self._check(text), ["A1.1", "CC7.2", "CSC-09"])
+
+    def test_criterion_supplied_as_a_code_is_not_double_reported(self):
+        # A token matching both patterns is only a stray if neither list has it.
+        self.assertEqual(ungrounded_identifiers("See CC6.1.", ["CC6.1"], []), [])
 
 
 if __name__ == "__main__":

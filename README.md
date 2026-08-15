@@ -338,7 +338,7 @@ This is the most direct answer to "how much of the AI vision is actually built?"
 | Memory & Knowledge Architecture | `industry-knowledge.js` (1 of 5 layers) | **Partially implemented** |
 | Orchestration Architecture (the scheduler) | none (`dependency-service.js` models data/sequence only) | **Not implemented** — the widest gap found |
 | Explainability Engine | `ai-lineage-service.js` | **Implemented** — populated by the Narrative Agent on approval; zero records in the seeded dataset |
-| AI Agents (all seven) | `narrative-agent.js`, `impact-agent.js` (2 of 7) | **Partially implemented** — the Documentation agent drafts Section III and the Reporting agent reasons about edit impact; the other five are named and specified below |
+| AI Agents (all seven) | `narrative-agent.js`, `impact-agent.js`, `testing-agent.js` (3 of 7) | **Partially implemented** — the Documentation agent drafts Section III, the Reporting agent reasons about edit impact, and the Testing agent drafts test procedures; the other four are named and specified below |
 
 Eight of these nine rows are unchanged: Release 1 remains thorough about the *mechanics* of governance — writes are audited, propagation is deterministic, lifecycles are enforced — and honest about the absence of intelligence behind them. The ninth is where that changed. The Narrative Agent is a real model call, and it landed without altering a single one of the mechanics rows: it drafts, it proposes, and a human decides. The Human Approval Engine is still marked *not implemented* because no general engine exists — what exists is the Suggestion lifecycle carrying one agent's output, which is the substrate such an engine would be built on rather than the engine itself.
 
@@ -397,7 +397,7 @@ graph LR
 | Walkthrough | `WALKTHROUGH_UPDATED` | `dependency-service.js`'s live-derivation comment | Comment only, no reserved function |
 | Controls | `CONTROLS_UPDATED` | `controls.js`'s Appendix A comment | Comment only, no reserved function |
 | Evidence | `EVIDENCE_UPDATED` | `ai-lineage-service.js`'s `aiLineage`/`origin` block | Named data contract, zero populated records |
-| Testing | `TESTING_UPDATED` | `testing.js`'s Appendix A comment | Comment only, no reserved function |
+| Testing | `TESTING_UPDATED` | `testing-agent.js` → `testing.testProcedure` | **Implemented** — drafts the procedure for a workpaper recording none |
 | Findings | `FINDINGS_UPDATED` | `findings.js`'s `"AI Drafted"` lifecycle state | Named state, zero populated records |
 | Reporting | `REPORT_UPDATED` | `impact-agent.js` → `reportPropagationService.describeImpact` | **Implemented** — reasons about what an edit implies for each upstream object |
 
